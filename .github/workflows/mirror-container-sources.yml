@@ -49,6 +49,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Start Container production builds
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN_CLASSIC }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           SOURCE: ${{ inputs.source || 'all' }}
         run: bash scripts/notify-container.sh
