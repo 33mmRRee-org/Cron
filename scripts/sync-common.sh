@@ -48,21 +48,40 @@ export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
 export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
 git ls-remote --refs --heads --tags "$target" > previous-refs
 { awk '$2=="main"' selected-refs; awk '$2!="main"' selected-refs; } > ordered-refs
+# Fetch every selected branch in one pass. Ubuntu mirrors six upstream branches
+# and a separate clone+fetch per branch dominated its runtime, while the refs a
+# single remote serves can travel in one request.
+rm -rf upstream.git
+git init --bare --quiet upstream.git
+declare -A fetched_from
+while read -r upstream_ref _branch alternate_upstream; do
+  selected_upstream=${alternate_upstream:-$UPSTREAM}
+  [[ -z "${fetched_from[$selected_upstream]:-}" ]] || continue
+  fetched_from[$selected_upstream]=1
+  # Explicit refspecs are required: a bare "refs/heads/x" fetch lands only in
+  # FETCH_HEAD and leaves no local ref for the archive step to read.
+  mapfile -t specs < <(awk -v mirror="$selected_upstream" -v fallback="$UPSTREAM" \
+    '{ source = ($3 == "" ? fallback : $3);
+       if (source == mirror) { ref = "refs/heads/" $1; print "+" ref ":" ref } }' ordered-refs)
+  git -c protocol.version=1 -C upstream.git fetch --quiet --depth=1 --no-tags \
+    "$selected_upstream" "${specs[@]}"
+done < ordered-refs
+
 while read -r upstream_ref branch alternate_upstream; do
   selected_upstream=${alternate_upstream:-$UPSTREAM}
-  rm -rf upstream.git snapshot
-  git init --bare --quiet upstream.git
-  git -c protocol.version=1 -C upstream.git fetch --quiet --depth=1 --no-tags \
-    "$selected_upstream" "refs/heads/$upstream_ref"
-  oid=$(git -C upstream.git rev-parse FETCH_HEAD)
-  stamp=$(git -C upstream.git show -s --format=%cI FETCH_HEAD)
+  rm -rf snapshot
+  git -C upstream.git rev-parse --verify --quiet "refs/heads/$upstream_ref" >/dev/null \
+    || git -c protocol.version=1 -C upstream.git fetch --quiet --depth=1 --no-tags \
+        "$selected_upstream" "refs/heads/$upstream_ref" >/dev/null 2>&1
+  oid=$(git -C upstream.git rev-parse "refs/heads/$upstream_ref")
+  stamp=$(git -C upstream.git show -s --format=%cI "refs/heads/$upstream_ref")
   mkdir snapshot
   paths=()
   while IFS= read -r -d '' path; do
     if keep_path "$path"; then paths+=("$path"); fi
-  done < <(git -C upstream.git ls-tree -rz --name-only FETCH_HEAD)
+  done < <(git -C upstream.git ls-tree -rz --name-only "refs/heads/$upstream_ref")
   ((${#paths[@]}))
-  git -C upstream.git archive FETCH_HEAD -- "${paths[@]}" | tar -xf - -C snapshot
+  git -C upstream.git archive "refs/heads/$upstream_ref" -- "${paths[@]}" | tar -xf - -C snapshot
   jq -n --arg distribution "$DISTRO" --arg upstream "$selected_upstream" --arg ref "$upstream_ref" --arg revision "$oid" \
     '{schema:1,distribution:$distribution,upstream:$upstream,ref:$ref,revision:$revision}' > snapshot/.container-source.json
   cp releases.json snapshot/.container-releases.json

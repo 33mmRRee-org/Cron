@@ -22,7 +22,10 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 2
+      # Ubuntu mirrors six upstream branches and takes minutes, while the other
+      # distributions finish in seconds. A limit of 2 left six slots idle waiting
+      # for it, so allow the whole matrix to run at once.
+      max-parallel: 8
       matrix:
         distribution: [Ubuntu, Debian, Centos, Alpine, Fedora, AlmaLinux, ArchLinux, RockyLinux]
     concurrency:
