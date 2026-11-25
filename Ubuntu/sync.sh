@@ -4,6 +4,20 @@ DISTRO=Ubuntu
 UPSTREAM=https://git.launchpad.net/livecd-rootfs
 DEFAULT_REF=ubuntu/master
 
+# Upstream only ships the OCI/container profile from bionic onwards. Probe the
+# branch instead of hard-coding versions, so a suite that loses the profile is
+# dropped automatically and no future release needs a manual edit.
+ref_has_oci_profile() {
+  local ref=$1
+  rm -rf profile-probe.git
+  git init --bare --quiet profile-probe.git
+  if ! git -c protocol.version=1 -C profile-probe.git fetch --quiet --depth=1 --no-tags \
+      "$UPSTREAM" "refs/heads/$ref" 2>/dev/null; then
+    return 2
+  fi
+  git -C profile-probe.git show FETCH_HEAD:live-build/auto/config 2>/dev/null | grep -q 'ubuntu-oci)'
+}
+
 discover_releases() {
   curl -fsSL --retry 3 https://changelogs.ubuntu.com/meta-release -o release-data
   # meta-release reports point releases ("20.04.5 LTS"); Docker Hub publishes only
@@ -20,7 +34,13 @@ discover_releases() {
   }' release-data > supported
   while read -r suite version; do
     ref="ubuntu/$suite"
-    grep -q "refs/heads/$ref$" upstream-refs || ref="$DEFAULT_REF"
+    if ! grep -q "refs/heads/$ref$" upstream-refs; then ref="$DEFAULT_REF"; fi
+    status=0
+    ref_has_oci_profile "$ref" || status=$?
+    if [[ "$status" == 1 ]]; then
+      echo "Skipping $suite: upstream $ref has no ubuntu-oci profile." >&2
+      continue
+    fi
     entry "$version" "$ref" "docker.io/library/ubuntu:$version" "[\"$suite\"]"
   done < supported
   add_latest_alias
