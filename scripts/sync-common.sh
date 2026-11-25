@@ -13,7 +13,7 @@ add_latest_alias() {
 }
 set -euo pipefail
 test -n "${GH_TOKEN:-}" || { echo 'GH_TOKEN secret is required.' >&2; exit 1; }
-org=Low-Price-Hosting
+org=33mmRRee-org
 target="https://github.com/$org/$DISTRO.git"
 marker="Managed by $org/Cron; upstream: $UPSTREAM; scope: container production code"
 today=$(date -u +%F)
